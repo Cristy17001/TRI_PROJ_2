@@ -8,7 +8,7 @@ TIME_STEP = 64
 
 def make_env():
     # Each env will grab its own Supervisor() internally
-    return RobotEnv()
+    return RobotEnv(verbose=False)
 
 if __name__ == "__main__":
     # 1) Wrap your single‐env in a DummyVecEnv
