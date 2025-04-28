@@ -18,9 +18,10 @@ WALL_PENALTY = -100.0
 STEP_PENALTY = -0.05  # Penalização leve por passo para incentivar eficiência
 
 class RobotEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, verbose=True):
         super(RobotEnv, self).__init__()
         
+        self.verbose = verbose
         self.supervisor = Supervisor()
         self.left_motor = self.supervisor.getDevice("left wheel motor")
         self.right_motor = self.supervisor.getDevice("right wheel motor")
@@ -43,6 +44,11 @@ class RobotEnv(gym.Env):
         self.previous_distance = None
         self.reset()
     
+    def log(self, message):
+        """Helper method to print messages only when verbose is True"""
+        if self.verbose:
+            print(message)
+    
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         
@@ -60,8 +66,11 @@ class RobotEnv(gym.Env):
             if initial_distance >= MIN_INITIAL_DISTANCE:
                 break
 
-        self.robot_translation.setSFVec3f([robot_x, robot_y, 0.03])
+        self.robot_translation.setSFVec3f([robot_x, robot_y, 0])
+        self.robot_node.resetPhysics()
+        
         self.star_translation.setSFVec3f([star_x, star_y, 0.03])
+        self.star_node.resetPhysics()
 
         # Cálculo otimizado de time_limit
         self.initial_distance = initial_distance
@@ -69,7 +78,7 @@ class RobotEnv(gym.Env):
         self.time_limit = int(4 * (initial_distance / half_max_linear_speed) * 1000 / TIME_STEP)
         self.step_count = 0
         
-        print(f"[RESET] Robô: ({robot_x:.2f}, {robot_y:.2f}), Estrela: ({star_x:.2f}, {star_y:.2f}), "
+        self.log(f"[RESET] Robô: ({robot_x:.2f}, {robot_y:.2f}), Estrela: ({star_x:.2f}, {star_y:.2f}), "
               f"Dist: {initial_distance:.2f}, Tempo: {self.time_limit}")
         
         self.previous_distance = initial_distance
@@ -167,20 +176,20 @@ class RobotEnv(gym.Env):
             
             if distance_reduction > 0.001:  # Progresso significativo
                 # Prints reduzidos apenas para feedback importante
-                print(f"[+] Bom progresso: {distance_reduction:.4f}, ângulo: {angle_diff*180:.1f}°")
+                self.log(f"[+] Bom progresso: {distance_reduction:.4f}, ângulo: {angle_diff*180:.1f}°")
         
         # 6. Verificar conclusão do episódio
         # Alcançou o objetivo
         if dist < COLLISION_THRESHOLD:
             reward += GOAL_REWARD
             terminated = True
-            print("[✓] Objetivo alcançado!")
+            self.log("[✓] Objetivo alcançado!")
         
         # Colisão com parede
         if abs(pos_x) >= 0.95 or abs(pos_y) >= 0.95:
             reward += WALL_PENALTY
             terminated = True
-            print("[✗] Colisão com parede!")
+            self.log("[✗] Colisão com parede!")
         
         # Limite de tempo
         self.step_count += 1
@@ -190,13 +199,12 @@ class RobotEnv(gym.Env):
             # Penalidade se terminou mais longe do que começou
             if dist > self.initial_distance:
                 reward -= 50.0
-                print(f"[!] Tempo esgotado - Terminou mais longe: {dist:.2f} > {self.initial_distance:.2f}")
+                self.log(f"[!] Tempo esgotado - Terminou mais longe: {dist:.2f} > {self.initial_distance:.2f}")
             else:
-                print(f"[!] Tempo esgotado - Progresso: {(1 - dist/self.initial_distance)*100:.1f}%")
+                self.log(f"[!] Tempo esgotado - Progresso: {(1 - dist/self.initial_distance)*100:.1f}%")
         
         # Print reduzido a cada 10 passos para não sobrecarregar
         if self.step_count % 10 == 0:
-            print(f"[i] Dist: {dist:.3f}, Reward: {reward:.2f}")
+            self.log(f"[i] Dist: {dist:.3f}, Reward: {reward:.2f}")
             
         return obs, reward, terminated, truncated, {}
-

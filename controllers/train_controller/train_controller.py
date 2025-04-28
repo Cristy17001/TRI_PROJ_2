@@ -15,7 +15,7 @@ device = "cpu"
 TIME_STEP = 64
 
 def make_env():
-    return RobotEnv()
+    return RobotEnv(verbose=False)
 
 if __name__ == "__main__":
     # Configuração simples com DummyVecEnv
