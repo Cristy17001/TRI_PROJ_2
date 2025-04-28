@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.log
+# Descomente se não quiser versionar os modelos
+# *.zip
