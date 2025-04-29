@@ -102,6 +102,105 @@ class RobotEnv(gym.Env):
         
         return np.array([pos[0], pos[1], normalized_yaw, dist, star_pos[0], star_pos[1]], dtype=np.float32)
 
+    def compute_reward(self):
+        obs = self._get_obs()
+        pos_x, pos_y, normalized_yaw, dist, star_x, star_y = obs
+
+        reward = 0.0
+        reward += STEP_PENALTY
+        self.log(f"Step penalty applied: {STEP_PENALTY}")
+
+        dx, dy = star_x - pos_x, star_y - pos_y
+        direction_to_goal = np.array([dx, dy])
+        direction_to_goal_norm = np.sqrt(dx*dx + dy*dy) + 1e-8
+        direction_to_goal = direction_to_goal / direction_to_goal_norm
+
+        yaw = normalized_yaw * np.pi
+        robot_direction = np.array([np.cos(yaw), np.sin(yaw)])
+        direction_dot = np.dot(robot_direction, direction_to_goal)  # ∈ [-1, 1]
+
+        angle_front_deg = np.rad2deg(np.arccos(np.clip(direction_dot, -1.0, 1.0)))
+        angle_back_deg = 180.0 - angle_front_deg
+        self.log(f"Angle from front: {angle_front_deg:.2f}°, from back: {angle_back_deg:.2f}°")
+
+        distance_reduction = self.previous_distance - dist
+        self.log(f"Distance reduced by: {distance_reduction:.4f}")
+        self.previous_distance = dist
+
+        movement_direction = np.sign(self.left_motor_speed + self.right_motor_speed)
+        self.log(f"Direction dot: {direction_dot:.4f}, Movement direction: {movement_direction}")
+
+        cos_8_deg = np.cos(np.deg2rad(8))
+
+        # --- Recompensa por progresso com orientação precisa ---
+        if distance_reduction > 0:
+            if direction_dot >= cos_8_deg and movement_direction > 0:
+                inc = distance_reduction * 150.0
+                reward += inc
+                self.log(f"Forward aligned reward: +{inc:.4f}")
+            elif direction_dot <= -cos_8_deg and movement_direction < 0:
+                inc = distance_reduction * 150.0
+                reward += inc
+                self.log(f"Reverse aligned reward: +{inc:.4f}")
+            else:
+                # Penalização com base na direção de movimento (não no menor ângulo)
+                if movement_direction > 0:
+                    angle_movement = angle_front_deg
+                    side = "front"
+                elif movement_direction < 0:
+                    angle_movement = angle_back_deg
+                    side = "back"
+                else:
+                    angle_movement = None
+                    side = "none"
+
+                if angle_movement is not None and angle_movement > 8.0:
+                    misalignment_deg = angle_movement - 8.0
+                    penalty = -0.02 * misalignment_deg
+                    reward += penalty
+                    self.log(f"Misaligned movement from {side} ({angle_movement:.2f}°). Penalty: {penalty:.4f}")
+                elif angle_movement is not None:
+                    self.log(f"Movement in correct direction ({side}) but not precisely aligned (<8°)")
+
+        # --- Bônus por movimento reto ---
+        motor_diff = abs(self.left_motor_speed - self.right_motor_speed) / MAX_SPEED
+        if abs(direction_dot) > 0.99 and distance_reduction > 0:
+            bonus = (1.0 - motor_diff) * 5.0
+            reward += bonus
+            self.log(f"Straight movement bonus: +{bonus:.4f}")
+
+        # --- Bônus de proximidade ---
+        proximity_bonus = (1.0 - dist / self.initial_distance) ** 2 * 30.0
+        reward += proximity_bonus
+        self.log(f"Proximity bonus: +{proximity_bonus:.4f}")
+
+        # --- Penalização por não progresso e má orientação ---
+        if distance_reduction <= 0 and abs(direction_dot) < 0.4:
+            reward -= 0.1
+            self.log("Penalty: No progress and poor alignment (-0.1)")
+
+        # --- Objetivo atingido ---
+        if dist < 0.2:
+            time_bonus = (1.0 - self.step_count / self.time_limit) * 100.0
+            reward += GOAL_REWARD + time_bonus
+            self.log(f"Goal reached! Reward: {GOAL_REWARD + time_bonus:.4f}")
+            self.goal_reached = True
+            return reward
+
+        # --- Penalização por colisão ---
+        if self.touched_wall():
+            reward += WALL_PENALTY
+            self.log(f"Wall collision! Penalty: {WALL_PENALTY}")
+
+        # --- Penalização por terminar longe demais ---
+        if self.step_count >= self.time_limit and dist > self.initial_distance:
+            reward -= 50.0
+            self.log("Time exceeded and robot ended farther from goal. Penalty: -50.0")
+
+        self.log(f"Total reward: {reward:.4f}")
+        return reward
+
+
     def step(self, action):
         # Calcular velocidades alvo
         target_left_speed = action[0] * MAX_SPEED
@@ -115,21 +214,20 @@ class RobotEnv(gym.Env):
         delta_left = target_left_speed - current_left_speed
         delta_right = target_right_speed - current_right_speed
         
-        left_speed = current_left_speed
-        if delta_left > MAX_ACCEL:
-            left_speed += MAX_ACCEL
-        elif delta_left < -MAX_ACCEL:
-            left_speed -= MAX_ACCEL
+        # Aplicar limites de aceleração
+        if abs(delta_left) > MAX_ACCEL:
+            left_speed = current_left_speed + (MAX_ACCEL if delta_left > 0 else -MAX_ACCEL)
         else:
             left_speed = target_left_speed
             
-        right_speed = current_right_speed
-        if delta_right > MAX_ACCEL:
-            right_speed += MAX_ACCEL
-        elif delta_right < -MAX_ACCEL:
-            right_speed -= MAX_ACCEL
+        if abs(delta_right) > MAX_ACCEL:
+            right_speed = current_right_speed + (MAX_ACCEL if delta_right > 0 else -MAX_ACCEL)
         else:
             right_speed = target_right_speed
+        
+        # Guardar velocidades para uso na função de recompensa
+        self.left_motor_speed = left_speed
+        self.right_motor_speed = right_speed
         
         # Aplicar velocidades e avançar simulação
         self.left_motor.setVelocity(left_speed)
@@ -138,73 +236,36 @@ class RobotEnv(gym.Env):
 
         # Obter observação após ação
         obs = self._get_obs()
-        pos_x, pos_y, normalized_yaw, dist, star_x, star_y = obs
-
-        # --- Sistema de Recompensas Simplificado ---
-        reward = STEP_PENALTY  # Penalização pequena por passo
-        terminated = False
-        truncated = False
+        _, _, _, dist, _, _ = obs
         
-        # 1. Calcular ângulo para a estrela (normalizado para [-1,1])
-        target_angle = np.arctan2(star_y - pos_y, star_x - pos_x) / np.pi
-        
-        # 2. Calcular diferença de ângulo (valor entre 0 e 1, onde 0 = perfeito)
-        angle_diff = abs(normalized_yaw - target_angle)
-        if angle_diff > 1.0:
-            angle_diff = 2.0 - angle_diff
-        angle_diff_normalized = angle_diff / 1.0  # Normalizar para [0,1]
-        
-        # 3. Calcular progresso na distância
-        distance_reduction = self.previous_distance - dist
-        self.previous_distance = dist
-        
-        # 4. Componente principal: Recompensa Shaping (combinação de orientação e progresso)
-        # - Orientação perfeita (0°) = 1.0, pior orientação (180°) = 0.0
-        orientation_factor = 1.0 - angle_diff_normalized
-        
-        # Recompensa principal: Progresso ponderado pela qualidade da orientação
-        # - Isso naturalmente incentiva primeiro orientar-se e depois mover-se
-        main_reward = distance_reduction * 150.0 * (0.2 + 0.8 * orientation_factor)
-        reward += main_reward
-        
-        # 5. Recompensa auxiliar por movimento eficiente (linha reta quando bem orientado)
-        motor_diff = abs(left_speed - right_speed) / (2 * MAX_SPEED)
-        if orientation_factor > 0.9:  # Bem orientado (< 18°)
-            # Incentiva movimento em linha reta quando bem alinhado
-            straight_reward = (1.0 - motor_diff) * 5.0 * (distance_reduction > 0)
-            reward += straight_reward
-            
-            if distance_reduction > 0.001:  # Progresso significativo
-                # Prints reduzidos apenas para feedback importante
-                self.log(f"[+] Bom progresso: {distance_reduction:.4f}, ângulo: {angle_diff*180:.1f}°")
-        
-        # 6. Verificar conclusão do episódio
-        # Alcançou o objetivo
-        if dist < COLLISION_THRESHOLD:
-            reward += GOAL_REWARD
-            terminated = True
-            self.log("[✓] Objetivo alcançado!")
-        
-        # Colisão com parede
-        if abs(pos_x) >= 0.95 or abs(pos_y) >= 0.95:
-            reward += WALL_PENALTY
-            terminated = True
-            self.log("[✗] Colisão com parede!")
-        
-        # Limite de tempo
+        # Atualizar contador de passos
         self.step_count += 1
-        if self.step_count >= self.time_limit:
-            truncated = True
-            
-            # Penalidade se terminou mais longe do que começou
-            if dist > self.initial_distance:
-                reward -= 50.0
-                self.log(f"[!] Tempo esgotado - Terminou mais longe: {dist:.2f} > {self.initial_distance:.2f}")
-            else:
-                self.log(f"[!] Tempo esgotado - Progresso: {(1 - dist/self.initial_distance)*100:.1f}%")
+        
+        # Variáveis para controle de estado
+        self.goal_reached = False
+        
+        # Calcular recompensa usando a função compute_reward
+        reward = self.compute_reward()
+        
+        # Verificar terminação do episódio
+        terminated = self.goal_reached or self.touched_wall()
+        truncated = self.step_count >= self.time_limit
+        
+        # Logging
+        if self.goal_reached:
+            self.log("[✓] Objetivo alcançado!")
+        elif self.touched_wall():
+            self.log("[✗] Colisão com parede!")
+        elif truncated:
+            self.log(f"[!] Tempo esgotado - Progresso: {(1 - dist/self.initial_distance)*100:.1f}%")
         
         # Print reduzido a cada 10 passos para não sobrecarregar
         if self.step_count % 10 == 0:
             self.log(f"[i] Dist: {dist:.3f}, Reward: {reward:.2f}")
             
         return obs, reward, terminated, truncated, {}
+        
+    def touched_wall(self):
+        # Verificar se o robô tocou nas paredes
+        pos = self.robot_node.getField("translation").getSFVec3f()
+        return abs(pos[0]) >= 0.95 or abs(pos[1]) >= 0.95
