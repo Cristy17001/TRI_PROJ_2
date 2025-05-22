@@ -27,24 +27,56 @@ if __name__ == "__main__":
     
     # Verificar modelo existente
     model_path = "ppo_epuck.zip"
-    if os.path.exists(model_path):
-        print(f"[LOAD] Carregando modelo salvo: {model_path}", file=sys.stderr)
-        model = PPO.load(model_path, env=vec_env, device=device)
-        model.n_steps = n_steps
-        model.batch_size = batch_size
 
-        # Recria o rollout_buffer para garantir inicialização correta
-        from stable_baselines3.common.buffers import RolloutBuffer
-        model.rollout_buffer = RolloutBuffer(
-            model.n_steps,
-            model.observation_space,
-            model.action_space,
-            model.device,
-            gamma=model.gamma,
-            gae_lambda=model.gae_lambda,
-        )
-    else:
-        print(f"[NEW] Criando novo modelo (device={device})", file=sys.stderr)
+    try:
+        # Tenta carregar o modelo - se o espaço de observação não corresponder, captura a exceção
+        if os.path.exists(model_path):
+            print(f"[LOAD] Tentando carregar modelo salvo: {model_path}", file=sys.stderr)
+            model = PPO.load(model_path, env=vec_env, device=device)
+            model.n_steps = n_steps
+            model.batch_size = batch_size
+
+            # Recria o rollout_buffer para garantir inicialização correta
+            from stable_baselines3.common.buffers import RolloutBuffer
+            model.rollout_buffer = RolloutBuffer(
+                model.n_steps,
+                model.observation_space,
+                model.action_space,
+                model.device,
+                gamma=model.gamma,
+                gae_lambda=model.gae_lambda,
+            )
+            print(f"[SUCCESS] Modelo carregado com sucesso!", file=sys.stderr)
+        else:
+            # Se o modelo não existe, cria um novo
+            print(f"[NEW] Criando novo modelo (device={device})", file=sys.stderr)
+            model = PPO(
+                policy="MlpPolicy",
+                env=vec_env,
+                verbose=1,
+                device=device,
+                n_steps=n_steps,
+                batch_size=batch_size,
+                learning_rate=3e-4,
+                n_epochs=10,
+                gamma=0.99,
+                gae_lambda=0.95,
+                ent_coef=0.01,
+                clip_range=0.2
+            )
+    except ValueError as e:
+        # Captura especificamente erros de incompatibilidade de espaço
+        print(f"[ERROR] {e}", file=sys.stderr)
+        print(f"[INFO] Modelo incompatível detectado. Renomeando modelo antigo...", file=sys.stderr)
+        
+        # Renomear o modelo antigo
+        if os.path.exists(model_path):
+            backup_name = "ppo_epuck_old_" + time.strftime("%Y%m%d_%H%M%S") + ".zip"
+            os.rename(model_path, backup_name)
+            print(f"[INFO] Modelo anterior renomeado para {backup_name}", file=sys.stderr)
+        
+        # Criar novo modelo
+        print(f"[NEW] Criando novo modelo com espaço de observação expandido", file=sys.stderr)
         model = PPO(
             policy="MlpPolicy",
             env=vec_env,

@@ -26,7 +26,7 @@ RectangleArena {
   wallThickness 0.05
   wallHeight 0.2
 }
-E-puck {
+DEF robot1 E-puck {  # MUDANÇA CRUCIAL: Adicionado DEF robot1
   hidden position_0_0 4988.973628279397
   hidden position_0_1 5315.716837777152
   hidden linearVelocity_0 0.009336821469013969 -0.004795845179469528 0.021085545363119684
@@ -42,6 +42,20 @@ E-puck {
   name "robot1"
   controller "train_controller"
   supervisor TRUE
+  turretSlot [
+    GPS {
+      children [
+        InertialUnit {
+        }
+      ]
+    }
+  ]
+}
+DEF RivalRobot E-puck {
+  translation 0.5 0.5 0 # Initial placeholder, will be updated by RobotEnv
+  name "robot2_rival"
+  controller "rival_controller"  # Agora usando o controlador rival_controller
+  supervisor TRUE # Allows the supervisor (RobotEnv) to move it
   turretSlot [
     GPS {
       children [

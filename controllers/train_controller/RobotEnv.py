@@ -37,10 +37,17 @@ class RobotEnv(gym.Env):
         self.robot_translation = self.robot_node.getField("translation")
         self.star_node = self.supervisor.getFromDef("Star")
         self.star_translation = self.star_node.getField("translation")
+        
+        # Adicionar referência ao robô rival
+        self.rival_robot_node = self.supervisor.getFromDef("RivalRobot")
+        if self.rival_robot_node is None:
+            print("AVISO: RivalRobot não encontrado!")
+        
         self.prev_dist = None  # To track starting distance from target
         
+        # Modificar o espaço de observação para incluir a posição do robô rival
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(6,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32)
         
         self.previous_distance = None
         self.reset()
@@ -101,7 +108,17 @@ class RobotEnv(gym.Env):
         dx, dy = pos[0] - star_pos[0], pos[1] - star_pos[1]
         dist = np.sqrt(dx*dx + dy*dy)
         
-        return np.array([pos[0], pos[1], normalized_yaw, dist, star_pos[0], star_pos[1]], dtype=np.float32)
+        # Obter posição do robô rival
+        rival_pos = self.rival_robot_node.getPosition() if self.rival_robot_node else [0, 0, 0]
+        
+        # Retornar observação ampliada com posição do robô rival
+        return np.array([
+            pos[0], pos[1], 
+            normalized_yaw, 
+            dist, 
+            star_pos[0], star_pos[1], 
+            rival_pos[0], rival_pos[1]
+        ], dtype=np.float32)
 
     def step(self, action):
         # Calcular velocidades alvo
@@ -139,7 +156,7 @@ class RobotEnv(gym.Env):
 
         # Obter observação após ação
         obs = self._get_obs()
-        pos_x, pos_y, normalized_yaw, dist, star_x, star_y = obs
+        pos_x, pos_y, normalized_yaw, dist, star_x, star_y, rival_x, rival_y = obs
 
         # --- Sistema de Recompensas Simplificado ---
         reward = STEP_PENALTY  # Penalização pequena por passo
@@ -180,6 +197,18 @@ class RobotEnv(gym.Env):
                 self.log(f"[+] Bom progresso: {distance_reduction:.4f}, ângulo: {angle_diff*180:.1f}°")
         
         # 6. Verificar conclusão do episódio
+        # Verificar colisão com o robô rival (adicionado)
+        if self.rival_robot_node:
+            # Calcular distância entre E-puck e robô rival
+            rival_dx, rival_dy = pos_x - rival_x, pos_y - rival_y
+            rival_dist = np.sqrt(rival_dx*rival_dx + rival_dy*rival_dy)
+            
+            # Diâmetro aproximado do E-puck é ~0.07m
+            if rival_dist < 0.08:  # Ligeiramente maior para garantir detecção
+                reward += WALL_PENALTY  # Mesma penalidade da parede
+                terminated = True
+                self.log("[✗] Colisão com robô rival!")
+    
         # Alcançou o objetivo
         if dist < COLLISION_THRESHOLD:
             reward += GOAL_REWARD
