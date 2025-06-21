@@ -13,9 +13,15 @@ SPAWN_RANGE = 0.9
 MAX_ACCEL = 1.0
 
 # Constantes de recompensa simplificadas
-GOAL_REWARD = 500.0
+GOAL_REWARD = 5000.0
 WALL_PENALTY = -100.0
-STEP_PENALTY = -0.05  # Penalização leve por passo para incentivar eficiência
+ROBOT_COLLISION_PENALTY = -10.0  # Penalização por colidir com o robô rival
+
+MAX_LINEAR_SPEED = 0.05      # Velocidade máxima do robô em m/s
+MAX_ANGULAR_SPEED = 6.28     # Velocidade máxima de rotação (rad/s)
+WHEEL_RADIUS = 0.0205        # Raio da roda do e-puck (m)
+AXLE_LENGTH = 0.052          # Distância entre rodas (m)
+
 
 class RobotEnv(gym.Env):
     def __init__(self, verbose=True):
@@ -46,7 +52,9 @@ class RobotEnv(gym.Env):
         self.prev_dist = None  # To track starting distance from target
         
         # Modificar o espaço de observação para incluir a posição do robô rival
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        self.action_space = spaces.Box(low=np.array([-1.0, -1.0]),
+                               high=np.array([1.0, 1.0]),
+                               dtype=np.float32)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32)
         
         self.previous_distance = None
@@ -79,6 +87,26 @@ class RobotEnv(gym.Env):
         
         self.star_translation.setSFVec3f([star_x, star_y, 0.03])
         self.star_node.resetPhysics()
+        
+        # Calcula direção do robô principal para a estrela
+        direction = [
+            star_x - robot_x,
+            star_y - robot_y,
+            0
+        ]
+        norm = (direction[0]**2 + direction[1]**2 + direction[2]**2) ** 0.5
+        if norm != 0:
+            direction = [d / norm for d in direction]
+
+        rival_spawn_pos = [
+            star_x - direction[0] * 0.1,
+            star_y - direction[1] * 0.1,
+            0
+        ]
+
+        # Define a posição do rival
+        self.rival_robot_node.getField("translation").setSFVec3f(rival_spawn_pos)
+        self.rival_robot_node.resetPhysics()
 
         # Cálculo otimizado de time_limit
         self.initial_distance = initial_distance
@@ -90,7 +118,7 @@ class RobotEnv(gym.Env):
               f"Dist: {initial_distance:.2f}, Tempo: {self.time_limit}")
         
         self.previous_distance = initial_distance
-        
+    
         # Avançar simulação antes de começar
         for _ in range(10):
             self.supervisor.step(TIME_STEP)
@@ -121,18 +149,21 @@ class RobotEnv(gym.Env):
         ], dtype=np.float32)
 
     def step(self, action):
-        # Calcular velocidades alvo
-        target_left_speed = action[0] * MAX_SPEED
-        target_right_speed = action[1] * MAX_SPEED
-        
+        # Obtem v e ω da ação normalizada
+        v = action[0] * MAX_LINEAR_SPEED
+        omega = action[1] * MAX_ANGULAR_SPEED
+
+        # Converte para velocidades das rodas em rad/s
+        target_left_speed = (v - omega * AXLE_LENGTH / 2) / WHEEL_RADIUS
+        target_right_speed = (v + omega * AXLE_LENGTH / 2) / WHEEL_RADIUS
+
         # Limitar aceleração
         current_left_speed = self.left_motor.getVelocity()
         current_right_speed = self.right_motor.getVelocity()
-        
-        # Aplicar aceleração limitada (cálculos simplificados)
+
         delta_left = target_left_speed - current_left_speed
         delta_right = target_right_speed - current_right_speed
-        
+
         left_speed = current_left_speed
         if delta_left > MAX_ACCEL:
             left_speed += MAX_ACCEL
@@ -140,7 +171,7 @@ class RobotEnv(gym.Env):
             left_speed -= MAX_ACCEL
         else:
             left_speed = target_left_speed
-            
+
         right_speed = current_right_speed
         if delta_right > MAX_ACCEL:
             right_speed += MAX_ACCEL
@@ -148,7 +179,11 @@ class RobotEnv(gym.Env):
             right_speed -= MAX_ACCEL
         else:
             right_speed = target_right_speed
-        
+
+        # Clamp the wheel speeds to the allowed range
+        left_speed = np.clip(left_speed, -MAX_SPEED, MAX_SPEED)
+        right_speed = np.clip(right_speed, -MAX_SPEED, MAX_SPEED)
+
         # Aplicar velocidades e avançar simulação
         self.left_motor.setVelocity(left_speed)
         self.right_motor.setVelocity(right_speed)
@@ -158,83 +193,70 @@ class RobotEnv(gym.Env):
         obs = self._get_obs()
         pos_x, pos_y, normalized_yaw, dist, star_x, star_y, rival_x, rival_y = obs
 
-        # --- Sistema de Recompensas Simplificado ---
-        reward = STEP_PENALTY  # Penalização pequena por passo
+        reward = 0
         terminated = False
         truncated = False
-        
-        # 1. Calcular ângulo para a estrela (normalizado para [-1,1])
-        target_angle = np.arctan2(star_y - pos_y, star_x - pos_x) / np.pi
-        
-        # 2. Calcular diferença de ângulo (valor entre 0 e 1, onde 0 = perfeito)
-        angle_diff = abs(normalized_yaw - target_angle)
-        if angle_diff > 1.0:
-            angle_diff = 2.0 - angle_diff
-        angle_diff_normalized = angle_diff / 1.0  # Normalizar para [0,1]
-        
-        # 3. Calcular progresso na distância
+
+        # Cálculo do progresso
         distance_reduction = self.previous_distance - dist
+        
         self.previous_distance = dist
         
-        # 4. Componente principal: Recompensa Shaping (combinação de orientação e progresso)
-        # - Orientação perfeita (0°) = 1.0, pior orientação (180°) = 0.0
-        orientation_factor = 1.0 - angle_diff_normalized
-        
-        # Recompensa principal: Progresso ponderado pela qualidade da orientação
-        # - Isso naturalmente incentiva primeiro orientar-se e depois mover-se
-        main_reward = distance_reduction * 150.0 * (0.2 + 0.8 * orientation_factor)
-        reward += main_reward
-        
-        # 5. Recompensa auxiliar por movimento eficiente (linha reta quando bem orientado)
-        motor_diff = abs(left_speed - right_speed) / (2 * MAX_SPEED)
-        if orientation_factor > 0.9:  # Bem orientado (< 18°)
-            # Incentiva movimento em linha reta quando bem alinhado
-            straight_reward = (1.0 - motor_diff) * 5.0 * (distance_reduction > 0)
-            reward += straight_reward
+        # * Penalização por diferença de velocidade entre rodas
+        wheel_diff = abs(left_speed - right_speed)
+        if wheel_diff > 0.5 * MAX_SPEED:
+            reward -= wheel_diff * 20
+
+        # Recompensa positiva se houver progresso
+        if distance_reduction > 0.001:
+            reward += distance_reduction * 10000.0  # Escala ajustável
+            self.log(f"[✓] Progresso: -{distance_reduction:.4f}")
             
-            if distance_reduction > 0.001:  # Progresso significativo
-                # Prints reduzidos apenas para feedback importante
-                self.log(f"[+] Bom progresso: {distance_reduction:.4f}, ângulo: {angle_diff*180:.1f}°")
-        
-        # 6. Verificar conclusão do episódio
-        # Verificar colisão com o robô rival (adicionado)
-        if self.rival_robot_node:
-            # Calcular distância entre E-puck e robô rival
-            rival_dx, rival_dy = pos_x - rival_x, pos_y - rival_y
-            rival_dist = np.sqrt(rival_dx*rival_dx + rival_dy*rival_dy)
-            
-            # Diâmetro aproximado do E-puck é ~0.07m
-            if rival_dist < 0.08:  # Ligeiramente maior para garantir detecção
-                reward += WALL_PENALTY  # Mesma penalidade da parede
-                terminated = True
-                self.log("[✗] Colisão com robô rival!")
-    
-        # Alcançou o objetivo
+        # Penalização se estagnou
+        elif abs(distance_reduction) <= 0.001:
+            reward -= 3
+            self.log("[!] Estagnado - sem progresso")
+
+        # Penalização mais forte se se afastou
+        elif distance_reduction < -0.001:
+            reward -= 5
+            self.log(f"[✗] Afastou-se: +{abs(distance_reduction):.4f}")
+
+        # * Chegou à estrela
         if dist < COLLISION_THRESHOLD:
             reward += GOAL_REWARD
             terminated = True
             self.log("[✓] Objetivo alcançado!")
-        
-        # Colisão com parede
+
+        # * Colidiu com parede
         if abs(pos_x) >= 0.95 or abs(pos_y) >= 0.95:
             reward += WALL_PENALTY
             terminated = True
             self.log("[✗] Colisão com parede!")
-        
-        # Limite de tempo
+
+        # * Colidiu com robô rival
+        if self.rival_robot_node:
+            rival_dx, rival_dy = pos_x - rival_x, pos_y - rival_y
+            rival_dist = np.sqrt(rival_dx**2 + rival_dy**2)
+            print(rival_dist)
+            if rival_dist < 0.085:
+                reward += ROBOT_COLLISION_PENALTY
+                terminated = True
+                self.log("[✗] Colisão com robô rival!")
+
+        # * Limite de tempo
         self.step_count += 1
         if self.step_count >= self.time_limit:
             truncated = True
-            
-            # Penalidade se terminou mais longe do que começou
             if dist > self.initial_distance:
                 reward -= 50.0
                 self.log(f"[!] Tempo esgotado - Terminou mais longe: {dist:.2f} > {self.initial_distance:.2f}")
             else:
                 self.log(f"[!] Tempo esgotado - Progresso: {(1 - dist/self.initial_distance)*100:.1f}%")
-        
-        # Print reduzido a cada 10 passos para não sobrecarregar
+
         if self.step_count % 10 == 0:
             self.log(f"[i] Dist: {dist:.3f}, Reward: {reward:.2f}")
-            
+
+        print(reward)
         return obs, reward, terminated, truncated, {}
+

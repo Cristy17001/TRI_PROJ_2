@@ -37,19 +37,38 @@ DEF robot1 E-puck {  # MUDANÇA CRUCIAL: Adicionado DEF robot1
   hidden rotation_2 0 1 0 0.1420679032220896
   hidden linearVelocity_2 0.014284894125641788 -0.005795885905041117 0.027263062416754247
   hidden angularVelocity_2 1.0105362602117443 1.3547065734680483 0.03941053693085475
-  translation 0.014529281667130824 0.36022243029028916 -0.00019857106682757975
+  translation -0.255367 -0.672688 0.03
   rotation 0.02797800780535963 0.009656091739871812 -0.9995618995197618 0.8113702805016557
   name "robot1"
   controller "train_controller"
   supervisor TRUE
   turretSlot [
-    GPS {
-      children [
-        InertialUnit {
+  # Sensor existente
+  GPS {
+    children [
+      InertialUnit {
+      }
+    ]
+  }
+
+  # Chapéu novo (Cone vermelho)
+  Transform {
+    translation 0 0 0.025
+    children [
+      Shape {
+        appearance Appearance {
+          material Material {
+            diffuseColor 0 0 1  # vermelho
+          }
         }
-      ]
-    }
-  ]
+        geometry Cone {
+          bottomRadius 0.025
+          height 0.04
+        }
+      }
+    ]
+  }
+]
 }
 DEF RivalRobot E-puck {
   translation 0.5 0.5 0 # Initial placeholder, will be updated by RobotEnv
@@ -57,16 +76,35 @@ DEF RivalRobot E-puck {
   controller "rival_controller"  # Agora usando o controlador rival_controller
   supervisor TRUE # Allows the supervisor (RobotEnv) to move it
   turretSlot [
-    GPS {
-      children [
-        InertialUnit {
+  # Sensor existente
+  GPS {
+    children [
+      InertialUnit {
+      }
+    ]
+  }
+
+  # Chapéu novo (Cone vermelho)
+  Transform {
+    translation 0 0 0.025
+    children [
+      Shape {
+        appearance Appearance {
+          material Material {
+            diffuseColor 1 0 0  # vermelho
+          }
         }
-      ]
-    }
-  ]
+        geometry Cone {
+          bottomRadius 0.025
+          height 0.04
+        }
+      }
+    ]
+  }
+]
 }
 DEF Star Solid {
-  translation 0.31463312087930595 -0.4926876254743784 0.03
+  translation 0.014529281667130824 0.36022243029028916 -0.00019857106682757975
   children [
     Shape {
       appearance PBRAppearance {
@@ -80,5 +118,5 @@ DEF Star Solid {
     }
   ]
   name "Star"
-  boundingObject USE Star
+  # boundingObject USE Star
 }
