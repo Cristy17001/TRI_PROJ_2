@@ -35,17 +35,6 @@ if __name__ == "__main__":
             model = PPO.load(model_path, env=vec_env, device=device)
             model.n_steps = n_steps
             model.batch_size = batch_size
-
-            # Recria o rollout_buffer para garantir inicialização correta
-            from stable_baselines3.common.buffers import RolloutBuffer
-            model.rollout_buffer = RolloutBuffer(
-                model.n_steps,
-                model.observation_space,
-                model.action_space,
-                model.device,
-                gamma=model.gamma,
-                gae_lambda=model.gae_lambda,
-            )
             print(f"[SUCCESS] Modelo carregado com sucesso!", file=sys.stderr)
         else:
             # Se o modelo não existe, cria um novo
@@ -84,11 +73,11 @@ if __name__ == "__main__":
             device=device,
             n_steps=n_steps,
             batch_size=batch_size,
-            learning_rate=3e-4,
+            learning_rate=1e-4,
             n_epochs=10,
             gamma=0.99,
             gae_lambda=0.95,
-            ent_coef=0.01,
+            ent_coef=0.001,
             clip_range=0.2
         )
 
