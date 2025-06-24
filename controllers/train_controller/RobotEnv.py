@@ -16,7 +16,7 @@ MAX_ACCEL = 1.0
 # CRÍTICAS (8-10): Objetivos principais e comportamentos destrutivos
 GOAL_REWARD = 200.0              # [10] Alcançar a estrela (objetivo principal) - AUMENTADO
 WALL_PENALTY = -50.0           # [9] Colisão com parede (evitar a todo custo) - AUMENTADO
-ROBOT_COLLISION_PENALTY = -15.0 # [7] Colisão com rival (séria mas recuperável)
+ROBOT_COLLISION_PENALTY = -50.0 # [7] Colisão com rival (séria mas recuperável)
 
 # IMPORTANTES (5-7): Progresso e competitividade
 PROGRESS_REWARD_BASE = 2.0      # [6] Recompensa base por progresso
@@ -30,7 +30,7 @@ APPROACH_REWARD = 0.2           # [3] Aproximação estratégica do rival
 
 # PENALIZAÇÕES LEVES (1-3): Correção de comportamento
 SIGN_CHANGE_PENALTY = -0.15     # [3] Mudança de sinal dos motores
-PROXIMITY_PENALTY = -5       # [2] Proximidade excessiva ao rival
+PROXIMITY_PENALTY = -10       # [2] Proximidade excessiva ao rival
 WHEEL_INEFFICIENCY_PENALTY = -0.3  # [2] Movimento ineficiente
 STEP_PENALTY = -0.005           # [1] Penalização por tempo (reduzida)
 
