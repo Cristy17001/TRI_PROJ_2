@@ -14,9 +14,9 @@ MAX_ACCEL = 1.0
 
 # Constantes de recompensa PADRONIZADAS por importância (escala 0-10)
 # CRÍTICAS (8-10): Objetivos principais e comportamentos destrutivos
-GOAL_REWARD = 30.0              # [10] Alcançar a estrela (objetivo principal) - AUMENTADO
-WALL_PENALTY = -25.0           # [9] Colisão com parede (evitar a todo custo) - AUMENTADO
-ROBOT_COLLISION_PENALTY = -3.0 # [7] Colisão com rival (séria mas recuperável)
+GOAL_REWARD = 200.0              # [10] Alcançar a estrela (objetivo principal) - AUMENTADO
+WALL_PENALTY = -50.0           # [9] Colisão com parede (evitar a todo custo) - AUMENTADO
+ROBOT_COLLISION_PENALTY = -15.0 # [7] Colisão com rival (séria mas recuperável)
 
 # IMPORTANTES (5-7): Progresso e competitividade
 PROGRESS_REWARD_BASE = 2.0      # [6] Recompensa base por progresso
