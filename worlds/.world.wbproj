@@ -8,3 +8,4 @@ orthographicViewHeight: 1
 textFiles: -1
 globalOptionalRendering: CoordinateSystem
 renderingDevicePerspectives: robot1:camera;0;1;0;0
+renderingDevicePerspectives: robot2_rival:camera;1;1;0;0
