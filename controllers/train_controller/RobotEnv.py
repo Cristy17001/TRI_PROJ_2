@@ -30,7 +30,7 @@ APPROACH_REWARD = 0.2           # [3] Aproximação estratégica do rival
 
 # PENALIZAÇÕES LEVES (1-3): Correção de comportamento
 SIGN_CHANGE_PENALTY = -0.15     # [3] Mudança de sinal dos motores
-PROXIMITY_PENALTY = -0.10       # [2] Proximidade excessiva ao rival
+PROXIMITY_PENALTY = -5       # [2] Proximidade excessiva ao rival
 WHEEL_INEFFICIENCY_PENALTY = -0.3  # [2] Movimento ineficiente
 STEP_PENALTY = -0.005           # [1] Penalização por tempo (reduzida)
 
