@@ -40,7 +40,7 @@ DEF robot1 E-puck {  # MUDANÇA CRUCIAL: Adicionado DEF robot1
   translation -0.255367 -0.672688 0.03
   rotation 0.02797800780535963 0.009656091739871812 -0.9995618995197618 0.8113702805016557
   name "robot1"
-  controller "train_controller"
+  controller "use_controller"
   supervisor TRUE
   turretSlot [
   # Sensor existente

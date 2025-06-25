@@ -6,10 +6,9 @@ TIME_STEP = 64
 MAX_SPEED = 6.28
 COLLISION_THRESHOLD = 0.08
 MIN_INITIAL_DISTANCE = 0.1  # distância mínima entre robô e estrela
-SPAWN_RANGE = 1  # intervalo de spawn aleatório (só afeta X agora)
+SPAWN_RANGE = 1
 
 def distance(pos1, pos2):
-    # Consider X and Y (ignore Z)
     return math.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)
 
 def compute_motor_speeds_zigzag(current_pos, current_angle, target_pos, max_speed, step_count, freq=0.05, amplitude=2):
@@ -78,10 +77,8 @@ if __name__ == "__main__":
             target_pos = [main_robot_pos[0], main_robot_pos[1]]
 
             dist = distance(gps_2d, target_pos)
-            # print("main_robot_dist:", dist)
-
-            # For compute_motor_speeds, you may want to keep using only X if that's your logic
-            l_speed, r_speed = compute_motor_speeds_zigzag(gps_2d, orientation, target_pos, MAX_SPEED * 0.5, step_counter)  # Reduzido de 0.8 para 0.5
+            
+            l_speed, r_speed = compute_motor_speeds_zigzag(gps_2d, orientation, target_pos, MAX_SPEED * 0.5, step_counter)
             step_counter += 1
             left_motor.setVelocity(l_speed)
             right_motor.setVelocity(r_speed)

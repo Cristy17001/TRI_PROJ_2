@@ -34,8 +34,8 @@ PROXIMITY_PENALTY = -10       # [2] Proximidade excessiva ao rival
 WHEEL_INEFFICIENCY_PENALTY = -0.3  # [2] Movimento ineficiente
 STEP_PENALTY = -0.005           # [1] Penalização por tempo (reduzida)
 
-MAX_LINEAR_SPEED = 0.08      # Aumentado de 0.05 para 0.08 (60% mais rápido)
-MAX_ANGULAR_SPEED = 8.0      # Aumentado de 6.28 para 8.0 (mais agilidade)
+MAX_LINEAR_SPEED = 0.08
+MAX_ANGULAR_SPEED = 8.0
 WHEEL_RADIUS = 0.0205        # Raio da roda do e-puck (m)
 AXLE_LENGTH = 0.052          # Distância entre rodas (m)
 
@@ -74,28 +74,32 @@ class RobotEnv(gym.Env):
         
         self.previous_distance = None
         
-        self.motor_command_history = []
-        self.consistent_movement_start = None
-        self.consistent_movement_duration = 0
-        self.prev_left_speed = 0.0
-        self.prev_right_speed = 0.0
-        self.sign_change_penalty_accumulator = 0.0
+        # Variáveis para rastreamento de comportamento dos motores
+        self.consistent_movement_start = None  # Início do movimento consistente
+        self.consistent_movement_duration = 0  # Duração do movimento consistente
+        self.prev_left_speed = 0.0  # Velocidade anterior do motor esquerdo
+        self.prev_right_speed = 0.0  # Velocidade anterior do motor direito
+        self.sign_change_penalty_accumulator = 0.0  # Acumulador de penalizações por mudança de sinal
         
+
         self.reset()
     
     def log(self, message):
+        """Helper method to print messages only when verbose is True"""
         if self.verbose:
             print(message)
     
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         
+        # Spawn aleatório
         while True:
             robot_x = np.random.uniform(-SPAWN_RANGE, SPAWN_RANGE)
             robot_y = np.random.uniform(-SPAWN_RANGE, SPAWN_RANGE)
             star_x = np.random.uniform(-SPAWN_RANGE, SPAWN_RANGE)
             star_y = np.random.uniform(-SPAWN_RANGE, SPAWN_RANGE)
             
+            # Cálculo único de distância
             dx, dy = star_x - robot_x, star_y - robot_y
             initial_distance = np.sqrt(dx*dx + dy*dy)
             
@@ -108,6 +112,7 @@ class RobotEnv(gym.Env):
         self.star_translation.setSFVec3f([star_x, star_y, 0.03])
         self.star_node.resetPhysics()
         
+        # Calcula direção do robô principal para a estrela
         direction = [
             star_x - robot_x,
             star_y - robot_y,
@@ -123,9 +128,11 @@ class RobotEnv(gym.Env):
             0
         ]
 
+        # Define a posição do rival
         self.rival_robot_node.getField("translation").setSFVec3f(rival_spawn_pos)
         self.rival_robot_node.resetPhysics()
 
+        # Cálculo otimizado de time_limit
         self.initial_distance = initial_distance
         half_max_linear_speed = 0.5 * MAX_SPEED * 0.02
         self.time_limit = int(8 * (initial_distance / half_max_linear_speed) * 1000 / TIME_STEP)
@@ -136,13 +143,14 @@ class RobotEnv(gym.Env):
         
         self.previous_distance = initial_distance
         
-        self.motor_command_history = []
+        # Reset das variáveis de comportamento dos motores
         self.consistent_movement_start = None
         self.consistent_movement_duration = 0
         self.prev_left_speed = 0.0
         self.prev_right_speed = 0.0
         self.sign_change_penalty_accumulator = 0.0
     
+        # Avançar simulação antes de começar
         for _ in range(10):
             self.supervisor.step(TIME_STEP)
         
@@ -150,14 +158,16 @@ class RobotEnv(gym.Env):
 
     def _get_obs(self):
         pos = self.gps.getValues()
-        yaw = self.imu.getRollPitchYaw()[2]
+        yaw = self.imu.getRollPitchYaw()[2] 
         normalized_yaw = yaw / np.pi
         
         star_pos = self.star_node.getPosition()
         
+        # Cálculo direto e eficiente de distância
         dx, dy = pos[0] - star_pos[0], pos[1] - star_pos[1]
         dist = np.sqrt(dx*dx + dy*dy)
         
+        # Obter posição do robô rival
         rival_pos = self.rival_robot_node.getPosition() if self.rival_robot_node else [0, 0, 0]
         
         return np.array([
@@ -281,22 +291,29 @@ class RobotEnv(gym.Env):
            (self.prev_left_speed < -0.1 and left_speed > 0.1):
             penalty += SIGN_CHANGE_PENALTY
             self.log(f"[⚠] Mudança sinal motor esquerdo: {SIGN_CHANGE_PENALTY:.3f}")
-            
         if (self.prev_right_speed > 0.1 and right_speed < -0.1) or \
            (self.prev_right_speed < -0.1 and right_speed > 0.1):
             penalty += SIGN_CHANGE_PENALTY
             self.log(f"[⚠] Mudança sinal motor direito: {SIGN_CHANGE_PENALTY:.3f}")
-            
         if penalty <= (SIGN_CHANGE_PENALTY * 1.8):
             penalty += SIGN_CHANGE_PENALTY * 1.3
             self.log(f"[⚠⚠] Mudança sinal simultânea: {SIGN_CHANGE_PENALTY * 1.3:.3f} extra")
-            
         self.prev_left_speed = left_speed
         self.prev_right_speed = right_speed
-        
         return penalty
 
     def step(self, action):
+        self.step_info = {
+            "reached_goal": False,
+            "collision_wall": False,
+            "collision_rival": False,
+            "timeout": False,
+            "final_progress": 0.0,
+            "initial_distance": self.initial_distance,
+            "final_distance": None,
+            "steps": self.step_count,
+        }
+
         v = action[0] * MAX_LINEAR_SPEED
         omega = action[1] * MAX_ANGULAR_SPEED
 
@@ -309,12 +326,8 @@ class RobotEnv(gym.Env):
         delta_left = target_left_speed - current_left_speed
         delta_right = target_right_speed - current_right_speed
 
-        left_speed = (
-            current_left_speed + np.clip(delta_left, -MAX_ACCEL, MAX_ACCEL)
-        )
-        right_speed = (
-            current_right_speed + np.clip(delta_right, -MAX_ACCEL, MAX_ACCEL)
-        )
+        left_speed = current_left_speed + np.clip(delta_left, -MAX_ACCEL, MAX_ACCEL)
+        right_speed = current_right_speed + np.clip(delta_right, -MAX_ACCEL, MAX_ACCEL)
 
         left_speed = np.clip(left_speed, -MAX_SPEED, MAX_SPEED)
         right_speed = np.clip(right_speed, -MAX_SPEED, MAX_SPEED)
@@ -341,6 +354,7 @@ class RobotEnv(gym.Env):
         reward += self._calculate_sign_change_penalty(left_speed, right_speed)
 
         progress_ratio = 1 - (dist / self.initial_distance)
+        self.step_info["final_progress"] = progress_ratio
         if progress_ratio > 0.8:
             reward += LEADING_BONUS * 0.625
         elif progress_ratio > 0.6:
@@ -349,15 +363,20 @@ class RobotEnv(gym.Env):
             reward += LEADING_BONUS * 0.125
 
         self.step_count += 1
+        self.step_info["steps"] = self.step_count
 
         if dist < COLLISION_THRESHOLD:
             reward += GOAL_REWARD
             terminated = True
+            self.step_info["reached_goal"] = True
+            self.step_info["final_distance"] = dist
             self.log("[✓] Objetivo alcançado!")
 
         if abs(pos_x) >= 0.95 or abs(pos_y) >= 0.95:
             reward += WALL_PENALTY
             terminated = True
+            self.step_info["collision_wall"] = True
+            self.step_info["final_distance"] = dist
             self.log("[✗] Colisão com parede!")
 
         if self.rival_robot_node:
@@ -365,12 +384,15 @@ class RobotEnv(gym.Env):
             if rival_dist < 0.08:
                 reward += ROBOT_COLLISION_PENALTY
                 terminated = True
+                self.step_info["collision_rival"] = True
+                self.step_info["final_distance"] = dist
                 self.log("[✗] Colisão com robô rival!")
 
-        self.step_count += 1
         if self.step_count >= self.time_limit:
             truncated = True
-            progress = 1 - (dist / self.initial_distance)
+            self.step_info["timeout"] = True
+            self.step_info["final_distance"] = dist
+            progress = progress_ratio
             if progress > 0.7:
                 reward += 3.0
                 self.log(f"[!] Tempo esgotado - Excelente progresso: {progress * 100:.1f}%")
@@ -385,7 +407,7 @@ class RobotEnv(gym.Env):
                 self.log(f"[!] Tempo esgotado - Progresso insuficiente: {progress * 100:.1f}%")
 
         if self.step_count % 50 == 0:
-            progress_pct = (1 - dist / self.initial_distance) * 100
+            progress_pct = progress_ratio * 100
             self.log(f"[i] Step {self.step_count}: Dist={dist:.3f}, Reward={reward:.3f}, Progress={progress_pct:.1f}%")
 
-        return obs, reward, terminated, truncated, {}
+        return obs, reward, terminated, truncated, self.step_info
