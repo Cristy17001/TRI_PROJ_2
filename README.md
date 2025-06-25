@@ -55,7 +55,7 @@ pip install numpy matplotlib torch gymnasium stable-baselines3
 
 ## Usage Instructions
 
-1. Clone the repository.
+1. Clone the [repository](https://github.com/Cristy17001/TRI_PROJ_2.git).
 2. Install the required dependencies (see Requirements above).
 3. Use each controller as needed:
    - For rival logic, use `rival_controller`.
